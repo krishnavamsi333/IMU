@@ -1,0 +1,1166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>IMU Pro Dashboard (ENU) - Enhanced</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://unpkg.com/three@0.158.0/build/three.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      color: #e5e7eb;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      overflow: hidden;
+      height: 100vh;
+    }
+
+    #app {
+      display: grid;
+      grid-template-columns: 320px 1fr 380px;
+      grid-template-rows: 60px 1fr;
+      height: 100vh;
+      gap: 12px;
+      padding: 12px;
+    }
+
+    #header {
+      grid-column: 1 / -1;
+      background: rgba(30, 41, 59, 0.6);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(148, 163, 184, 0.1);
+      border-radius: 12px;
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .logo {
+      font-size: 20px;
+      font-weight: 700;
+      background: linear-gradient(135deg, #60a5fa, #a78bfa);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    #connection-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #ef4444;
+      animation: pulse 2s infinite;
+    }
+
+    .status-dot.connected {
+      background: #10b981;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .panel {
+      background: rgba(30, 41, 59, 0.4);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(148, 163, 184, 0.1);
+      border-radius: 12px;
+      padding: 20px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .panel-title {
+      font-size: 14px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #94a3b8;
+      margin-bottom: 16px;
+    }
+
+    #left-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .stat-group {
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .stat-item {
+      display: flex;
+      justify-content: space-between;
+      margin: 8px 0;
+      font-size: 13px;
+    }
+
+    .stat-label {
+      color: #94a3b8;
+    }
+
+    .stat-value {
+      font-weight: 600;
+      font-family: 'Courier New', monospace;
+    }
+
+    .orientation-display {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .angle-card {
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 8px;
+      padding: 12px;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .angle-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent-color), transparent);
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    .angle-card.updating::before {
+      opacity: 1;
+      animation: shimmer 0.8s ease;
+    }
+
+    @keyframes shimmer {
+      from { transform: translateX(-100%); }
+      to { transform: translateX(100%); }
+    }
+
+    .angle-card:nth-child(1) { --accent-color: #ef4444; }
+    .angle-card:nth-child(2) { --accent-color: #10b981; }
+    .angle-card:nth-child(3) { --accent-color: #3b82f6; }
+
+    .angle-label {
+      font-size: 11px;
+      color: #94a3b8;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+
+    .angle-value {
+      font-size: 24px;
+      font-weight: 700;
+      font-family: 'Courier New', monospace;
+    }
+
+    .magnitude-display {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(148, 163, 184, 0.1);
+    }
+
+    .magnitude-bar {
+      height: 4px;
+      background: rgba(148, 163, 184, 0.2);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 4px;
+    }
+
+    .magnitude-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #3b82f6, #60a5fa);
+      transition: width 0.2s ease;
+    }
+
+    #center-panel {
+      position: relative;
+      overflow: hidden;
+    }
+
+    #three-container {
+      width: 100%;
+      height: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+
+    #view-controls {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      display: flex;
+      gap: 8px;
+      z-index: 10;
+    }
+
+    .control-btn {
+      width: 36px;
+      height: 36px;
+      background: rgba(30, 41, 59, 0.8);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      border-radius: 8px;
+      color: #e5e7eb;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+
+    .control-btn:hover {
+      background: rgba(51, 65, 85, 0.9);
+      transform: scale(1.05);
+    }
+
+    .control-btn.active {
+      background: rgba(59, 130, 246, 0.3);
+      border-color: #3b82f6;
+    }
+
+    #right-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      overflow-y: auto;
+    }
+
+    .chart-container {
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 8px;
+      padding: 16px;
+      height: 200px;
+      position: relative;
+    }
+
+    .chart-controls {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      display: flex;
+      gap: 4px;
+      z-index: 10;
+    }
+
+    .chart-btn {
+      width: 24px;
+      height: 24px;
+      background: rgba(30, 41, 59, 0.8);
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      border-radius: 4px;
+      color: #e5e7eb;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      transition: all 0.2s;
+    }
+
+    .chart-btn:hover {
+      background: rgba(51, 65, 85, 0.9);
+    }
+
+    .controls-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .btn {
+      padding: 10px 16px;
+      background: rgba(51, 65, 85, 0.6);
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      border-radius: 8px;
+      color: #e5e7eb;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      justify-content: center;
+    }
+
+    .btn:hover:not(:disabled) {
+      background: rgba(71, 85, 105, 0.8);
+      transform: translateY(-1px);
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn.primary {
+      background: linear-gradient(135deg, #3b82f6, #2563eb);
+      border-color: transparent;
+    }
+
+    .btn.primary:hover:not(:disabled) {
+      background: linear-gradient(135deg, #2563eb, #1d4ed8);
+    }
+
+    .btn.danger {
+      background: linear-gradient(135deg, #ef4444, #dc2626);
+      border-color: transparent;
+    }
+
+    .recording {
+      animation: recording-pulse 1.5s infinite;
+    }
+
+    @keyframes recording-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+
+    .alert {
+      background: rgba(59, 130, 246, 0.1);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 12px;
+      color: #93c5fd;
+      display: none;
+    }
+
+    .alert.show {
+      display: block;
+      animation: slideIn 0.3s ease;
+    }
+
+    .alert.success {
+      background: rgba(16, 185, 129, 0.1);
+      border-color: rgba(16, 185, 129, 0.3);
+      color: #6ee7b7;
+    }
+
+    .alert.warning {
+      background: rgba(245, 158, 11, 0.1);
+      border-color: rgba(245, 158, 11, 0.3);
+      color: #fcd34d;
+    }
+
+    .alert.error {
+      background: rgba(239, 68, 68, 0.1);
+      border-color: rgba(239, 68, 68, 0.3);
+      color: #fca5a5;
+    }
+
+    @keyframes slideIn {
+      from { transform: translateY(-10px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+
+    .settings-panel {
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .setting-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin: 8px 0;
+      font-size: 13px;
+    }
+
+    .slider {
+      width: 120px;
+      height: 4px;
+      -webkit-appearance: none;
+      appearance: none;
+      background: rgba(148, 163, 184, 0.3);
+      border-radius: 2px;
+      outline: none;
+    }
+
+    .slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 14px;
+      height: 14px;
+      background: #3b82f6;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+
+    .slider::-moz-range-thumb {
+      width: 14px;
+      height: 14px;
+      background: #3b82f6;
+      border-radius: 50%;
+      cursor: pointer;
+      border: none;
+    }
+
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.5);
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, 0.3);
+      border-radius: 3px;
+    }
+
+    @media (max-width: 1200px) {
+      #app {
+        grid-template-columns: 1fr;
+        grid-template-rows: 60px auto auto auto;
+      }
+      .chart-container {
+        height: 180px;
+      }
+    }
+
+    .fps-counter {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      background: rgba(30, 41, 59, 0.8);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 12px;
+      font-family: 'Courier New', monospace;
+      color: #94a3b8;
+    }
+  </style>
+</head>
+<body>
+
+<div id="app">
+  <div id="header">
+    <div class="logo">⚡ IMU Dashboard Pro</div>
+    <div id="connection-status">
+      <div class="status-dot" id="status-dot"></div>
+      <span id="status-text">Connecting...</span>
+    </div>
+  </div>
+
+  <div id="left-panel" class="panel">
+    <div class="panel-title">Orientation (ENU Frame)</div>
+    <div class="orientation-display">
+      <div class="angle-card" id="roll-card">
+        <div class="angle-label">Roll (X)</div>
+        <div class="angle-value" id="roll-display">0.0°</div>
+      </div>
+      <div class="angle-card" id="pitch-card">
+        <div class="angle-label">Pitch (Y)</div>
+        <div class="angle-value" id="pitch-display">0.0°</div>
+      </div>
+      <div class="angle-card" id="yaw-card">
+        <div class="angle-label">Yaw (Z)</div>
+        <div class="angle-value" id="yaw-display">0.0°</div>
+      </div>
+    </div>
+
+    <div class="panel-title" style="margin-top: 24px;">Motion Magnitude</div>
+    <div class="stat-group">
+      <div class="stat-item">
+        <span class="stat-label">Accel Magnitude</span>
+        <span class="stat-value" id="accel-mag">0.00 m/s²</span>
+      </div>
+      <div class="magnitude-bar">
+        <div class="magnitude-fill" id="accel-mag-bar" style="width: 0%"></div>
+      </div>
+      <div class="stat-item" style="margin-top: 12px;">
+        <span class="stat-label">Gyro Magnitude</span>
+        <span class="stat-value" id="gyro-mag">0.00 rad/s</span>
+      </div>
+      <div class="magnitude-bar">
+        <div class="magnitude-fill" id="gyro-mag-bar" style="width: 0%"></div>
+      </div>
+    </div>
+
+    <div class="panel-title" style="margin-top: 24px;">Statistics</div>
+    <div class="stat-group">
+      <div class="stat-item">
+        <span class="stat-label">Update Rate</span>
+        <span class="stat-value" id="update-rate">0 Hz</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Messages</span>
+        <span class="stat-value" id="msg-count">0</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Data Points</span>
+        <span class="stat-value" id="data-points">0</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Recording Time</span>
+        <span class="stat-value" id="record-time">0:00</span>
+      </div>
+    </div>
+
+    <div class="panel-title" style="margin-top: 24px;">Current Values</div>
+    <div class="stat-group">
+      <div class="stat-item">
+        <span class="stat-label">Accel X (East)</span>
+        <span class="stat-value" id="accel-x">0.00</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Accel Y (North)</span>
+        <span class="stat-value" id="accel-y">0.00</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Accel Z (Up)</span>
+        <span class="stat-value" id="accel-z">0.00</span>
+      </div>
+    </div>
+
+    <div class="stat-group">
+      <div class="stat-item">
+        <span class="stat-label">Gyro X (East)</span>
+        <span class="stat-value" id="gyro-x">0.00</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Gyro Y (North)</span>
+        <span class="stat-value" id="gyro-y">0.00</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Gyro Z (Up)</span>
+        <span class="stat-value" id="gyro-z">0.00</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="center-panel" class="panel">
+    <div id="view-controls">
+      <button class="control-btn" id="reset-view" title="Reset View">↻</button>
+      <button class="control-btn active" id="toggle-grid" title="Toggle Grid">⊞</button>
+      <button class="control-btn" id="toggle-axes" title="Toggle Axes">⊕</button>
+      <button class="control-btn" id="toggle-trail" title="Toggle Trail">～</button>
+    </div>
+    <div id="three-container"></div>
+    <div class="fps-counter">
+      <span id="fps">0</span> FPS | <span id="render-time">0</span>ms
+    </div>
+  </div>
+
+  <div id="right-panel" class="panel">
+    <div class="panel-title">Linear Acceleration (m/s²)</div>
+    <div class="chart-container">
+      <div class="chart-controls">
+        <button class="chart-btn" id="pause-accel" title="Pause">⏸</button>
+        <button class="chart-btn" id="clear-accel" title="Clear">✕</button>
+      </div>
+      <canvas id="accel-chart"></canvas>
+    </div>
+
+    <div class="panel-title">Angular Velocity (rad/s)</div>
+    <div class="chart-container">
+      <div class="chart-controls">
+        <button class="chart-btn" id="pause-gyro" title="Pause">⏸</button>
+        <button class="chart-btn" id="clear-gyro" title="Clear">✕</button>
+      </div>
+      <canvas id="gyro-chart"></canvas>
+    </div>
+
+    <div class="panel-title">Settings</div>
+    <div class="settings-panel">
+      <div class="setting-item">
+        <span class="stat-label">Chart History</span>
+        <input type="range" class="slider" id="chart-length" min="50" max="500" value="200" step="50">
+        <span class="stat-value" id="chart-length-val">200</span>
+      </div>
+      <div class="setting-item">
+        <span class="stat-label">Update Rate Limit</span>
+        <input type="range" class="slider" id="rate-limit" min="10" max="100" value="40" step="10">
+        <span class="stat-value" id="rate-limit-val">40 Hz</span>
+      </div>
+    </div>
+
+    <div class="panel-title">Controls</div>
+    <div class="controls-group">
+      <button class="btn primary" id="calibrate-btn">🎯 Calibrate Yaw (East = 0°)</button>
+      <button class="btn" id="record-btn">⏺ Start Recording</button>
+      <button class="btn" id="export-btn" disabled>💾 Export Data (CSV)</button>
+      <button class="btn" id="clear-btn">🗑 Clear All Data</button>
+      <button class="btn" id="reconnect-btn">🔄 Reconnect MQTT</button>
+    </div>
+
+    <div class="alert" id="alert-box"></div>
+  </div>
+</div>
+
+<script>
+/* ===================== STATE ===================== */
+const state = {
+  connected: false,
+  recording: false,
+  recordedData: [],
+  recordingStartTime: 0,
+  msgCount: 0,
+  dataPoints: 0,
+  lastUpdateTime: 0,
+  updateRate: 0,
+  yawOffset: 0,
+  calibrated: false,
+  showGrid: true,
+  showAxes: true,
+  showTrail: false,
+  chartsPaused: { accel: false, gyro: false },
+  maxChartPoints: 200,
+  rateLimit: 40,
+  trail: []
+};
+
+/* ===================== MQTT ===================== */
+let client;
+
+function connectMQTT() {
+  client = mqtt.connect("ws://broker.emqx.io:8083/mqtt", {
+    clientId: "imu_pro_" + Math.random().toString(16).slice(2),
+    reconnectPeriod: 3000,
+    connectTimeout: 10000
+  });
+
+  client.on("connect", () => {
+    state.connected = true;
+    updateConnectionStatus();
+    client.subscribe("robot/imu/bno085", (err) => {
+      if (err) {
+        showAlert("Subscription failed", "error");
+      } else {
+        showAlert("Connected and subscribed successfully", "success");
+      }
+    });
+  });
+
+  client.on("error", (err) => {
+    state.connected = false;
+    updateConnectionStatus();
+    console.error("MQTT Error:", err);
+  });
+
+  client.on("reconnect", () => {
+    showAlert("Reconnecting to broker...", "warning");
+  });
+
+  client.on("offline", () => {
+    state.connected = false;
+    updateConnectionStatus();
+  });
+}
+
+connectMQTT();
+
+function updateConnectionStatus() {
+  const dot = document.getElementById("status-dot");
+  const text = document.getElementById("status-text");
+  if (state.connected) {
+    dot.classList.add("connected");
+    text.textContent = "Connected";
+  } else {
+    dot.classList.remove("connected");
+    text.textContent = "Disconnected";
+  }
+}
+
+/* ===================== CHARTS ===================== */
+function createChart(canvasId) {
+  return new Chart(document.getElementById(canvasId), {
+    type: "line",
+    data: {
+      labels: [],
+      datasets: [
+        { label: "X (East)", data: [], borderColor: "#ef4444", borderWidth: 2, pointRadius: 0, tension: 0.3 },
+        { label: "Y (North)", data: [], borderColor: "#10b981", borderWidth: 2, pointRadius: 0, tension: 0.3 },
+        { label: "Z (Up)", data: [], borderColor: "#3b82f6", borderWidth: 2, pointRadius: 0, tension: 0.3 }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: { display: false },
+        y: { 
+          grid: { color: 'rgba(148, 163, 184, 0.1)' },
+          ticks: { color: '#94a3b8', font: { size: 10 } }
+        }
+      },
+      plugins: {
+        legend: { 
+          display: true,
+          labels: { color: '#94a3b8', font: { size: 11 } }
+        }
+      }
+    }
+  });
+}
+
+const accelChart = createChart("accel-chart");
+const gyroChart = createChart("gyro-chart");
+
+function pushChartData(chart, x, y, z, isPaused) {
+  if (isPaused) return;
+  
+  chart.data.labels.push("");
+  chart.data.datasets[0].data.push(x);
+  chart.data.datasets[1].data.push(y);
+  chart.data.datasets[2].data.push(z);
+  
+  if (chart.data.labels.length > state.maxChartPoints) {
+    chart.data.labels.shift();
+    chart.data.datasets.forEach(d => d.data.shift());
+  }
+  
+  chart.update("none");
+}
+
+/* ===================== THREE.JS ===================== */
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x020617);
+
+const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+camera.position.set(4, 3, 4);
+camera.lookAt(0, 0, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+const container = document.getElementById("three-container");
+container.appendChild(renderer.domElement);
+
+// IMU Model
+const imuGroup = new THREE.Group();
+const pcbGeometry = new THREE.BoxGeometry(2, 0.1, 1.5);
+const pcbMaterial = new THREE.MeshStandardMaterial({ 
+  color: 0x1e293b,
+  metalness: 0.3,
+  roughness: 0.7
+});
+const pcb = new THREE.Mesh(pcbGeometry, pcbMaterial);
+imuGroup.add(pcb);
+
+const chipGeometry = new THREE.BoxGeometry(0.6, 0.15, 0.6);
+const chipMaterial = new THREE.MeshStandardMaterial({ 
+  color: 0x374151,
+  metalness: 0.5,
+  roughness: 0.5
+});
+const chip = new THREE.Mesh(chipGeometry, chipMaterial);
+chip.position.y = 0.125;
+imuGroup.add(chip);
+
+scene.add(imuGroup);
+
+// Grid
+const gridHelper = new THREE.GridHelper(10, 10, 0x334155, 0x1e293b);
+scene.add(gridHelper);
+
+// Axes
+const axesHelper = new THREE.Group();
+const xAxis = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 0), 3, 0xff0000);
+const yAxis = new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 0), 3, 0x00ff00);
+const zAxis = new THREE.ArrowHelper(new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, 0, 0), 3, 0x0000ff);
+axesHelper.add(xAxis, yAxis, zAxis);
+scene.add(axesHelper);
+
+// Trail
+const trailGeometry = new THREE.BufferGeometry();
+const trailMaterial = new THREE.LineBasicMaterial({ color: 0x60a5fa, linewidth: 2 });
+const trailLine = new THREE.Line(trailGeometry, trailMaterial);
+scene.add(trailLine);
+
+// Lighting
+scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.8);
+dirLight1.position.set(5, 5, 5);
+scene.add(dirLight1);
+const dirLight2 = new THREE.DirectionalLight(0xffffff, 0.3);
+dirLight2.position.set(-5, 3, -5);
+scene.add(dirLight2);
+
+// Camera control
+let isDragging = false;
+let previousMousePosition = { x: 0, y: 0 };
+let cameraRotation = { theta: Math.PI / 4, phi: Math.PI / 6 };
+const cameraDistance = 5;
+
+renderer.domElement.addEventListener('mousedown', (e) => {
+  isDragging = true;
+  previousMousePosition = { x: e.clientX, y: e.clientY };
+});
+
+document.addEventListener('mouseup', () => {
+  isDragging = false;
+});
+
+document.addEventListener('mousemove', (e) => {
+  if (isDragging) {
+    const deltaX = e.clientX - previousMousePosition.x;
+    const deltaY = e.clientY - previousMousePosition.y;
+    
+    cameraRotation.theta -= deltaX * 0.01;
+    cameraRotation.phi -= deltaY * 0.01;
+    cameraRotation.phi = Math.max(0.1, Math.min(Math.PI - 0.1, cameraRotation.phi));
+    
+    updateCameraPosition();
+    previousMousePosition = { x: e.clientX, y: e.clientY };
+  }
+});
+
+// Zoom
+let currentCameraDistance = 5;
+renderer.domElement.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const zoomSpeed = 0.3;
+  currentCameraDistance += (e.deltaY > 0 ? zoomSpeed : -zoomSpeed);
+  currentCameraDistance = Math.max(2, Math.min(15, currentCameraDistance));
+  updateCameraPosition();
+});
+
+function updateCameraPosition() {
+  camera.position.x = currentCameraDistance * Math.sin(cameraRotation.phi) * Math.cos(cameraRotation.theta);
+  camera.position.y = currentCameraDistance * Math.cos(cameraRotation.phi);
+  camera.position.z = currentCameraDistance * Math.sin(cameraRotation.phi) * Math.sin(cameraRotation.theta);
+  camera.lookAt(0, 0, 0);
+}
+
+function resizeRenderer() {
+  const rect = container.getBoundingClientRect();
+  camera.aspect = rect.width / rect.height;
+  camera.updateProjectionMatrix();
+  renderer.setSize(rect.width, rect.height);
+}
+
+window.addEventListener("resize", resizeRenderer);
+resizeRenderer();
+
+// FPS Counter
+let frameCount = 0;
+let lastFpsTime = performance.now();
+let lastFrameTime = performance.now();
+
+function animate() {
+  requestAnimationFrame(animate);
+  
+  const now = performance.now();
+  const renderTime = now - lastFrameTime;
+  lastFrameTime = now;
+  
+  // Update trail
+  if (state.showTrail && state.trail.length > 1) {
+    const positions = new Float32Array(state.trail.length * 3);
+    state.trail.forEach((pos, i) => {
+      positions[i * 3] = pos.x;
+      positions[i * 3 + 1] = pos.y;
+      positions[i * 3 + 2] = pos.z;
+    });
+    trailGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    trailLine.visible = true;
+  } else {
+    trailLine.visible = false;
+  }
+  
+  renderer.render(scene, camera);
+  
+  // FPS calculation
+  frameCount++;
+  if (now - lastFpsTime >= 1000) {
+    document.getElementById("fps").textContent = frameCount;
+    document.getElementById("render-time").textContent = renderTime.toFixed(1);
+    frameCount = 0;
+    lastFpsTime = now;
+  }
+}
+animate();
+
+/* ===================== CONTROLS ===================== */
+document.getElementById("reset-view").addEventListener("click", () => {
+  cameraRotation = { theta: Math.PI / 4, phi: Math.PI / 6 };
+  currentCameraDistance = 5;
+  updateCameraPosition();
+  showAlert("View reset", "success");
+});
+
+document.getElementById("toggle-grid").addEventListener("click", (e) => {
+  state.showGrid = !state.showGrid;
+  gridHelper.visible = state.showGrid;
+  e.target.classList.toggle("active");
+});
+
+document.getElementById("toggle-axes").addEventListener("click", (e) => {
+  state.showAxes = !state.showAxes;
+  axesHelper.visible = state.showAxes;
+  e.target.classList.toggle("active");
+});
+
+document.getElementById("toggle-trail").addEventListener("click", (e) => {
+  state.showTrail = !state.showTrail;
+  if (!state.showTrail) {
+    state.trail = [];
+  }
+  e.target.classList.toggle("active");
+});
+
+document.getElementById("calibrate-btn").addEventListener("click", () => {
+  const euler = new THREE.Euler().setFromQuaternion(imuGroup.quaternion, "YXZ");
+  state.yawOffset = THREE.MathUtils.radToDeg(euler.y);
+  state.calibrated = true;
+  showAlert("Yaw calibrated! East is now 0°", "success");
+});
+
+document.getElementById("record-btn").addEventListener("click", () => {
+  state.recording = !state.recording;
+  const btn = document.getElementById("record-btn");
+  const exportBtn = document.getElementById("export-btn");
+  
+  if (state.recording) {
+    btn.textContent = "⏹ Stop Recording";
+    btn.classList.add("recording", "danger");
+    state.recordedData = [];
+    state.recordingStartTime = Date.now();
+    exportBtn.disabled = true;
+  } else {
+    btn.textContent = "⏺ Start Recording";
+    btn.classList.remove("recording", "danger");
+    showAlert(`Recording stopped. ${state.recordedData.length} samples captured.`, "success");
+    exportBtn.disabled = state.recordedData.length === 0;
+  }
+});
+
+document.getElementById("export-btn").addEventListener("click", () => {
+  if (state.recordedData.length === 0) {
+    showAlert("No data to export. Start recording first.", "warning");
+    return;
+  }
+  
+  let csv = "timestamp,elapsed_ms,roll,pitch,yaw,accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,accel_mag,gyro_mag\n";
+  const startTime = state.recordedData[0].timestamp;
+  
+  state.recordedData.forEach(row => {
+    const elapsed = row.timestamp - startTime;
+    csv += `${row.timestamp},${elapsed},${row.roll},${row.pitch},${row.yaw},`;
+    csv += `${row.accel.x},${row.accel.y},${row.accel.z},`;
+    csv += `${row.gyro.x},${row.gyro.y},${row.gyro.z},`;
+    csv += `${row.accelMag},${row.gyroMag}\n`;
+  });
+  
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `imu_data_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  
+  showAlert(`Data exported successfully! (${state.recordedData.length} samples)`, "success");
+});
+
+document.getElementById("clear-btn").addEventListener("click", () => {
+  if (confirm("Clear all data? This cannot be undone.")) {
+    accelChart.data.labels = [];
+    accelChart.data.datasets.forEach(d => d.data = []);
+    gyroChart.data.labels = [];
+    gyroChart.data.datasets.forEach(d => d.data = []);
+    accelChart.update();
+    gyroChart.update();
+    state.dataPoints = 0;
+    state.recordedData = [];
+    state.trail = [];
+    document.getElementById("export-btn").disabled = true;
+    showAlert("All data cleared.", "success");
+  }
+});
+
+document.getElementById("reconnect-btn").addEventListener("click", () => {
+  if (client) {
+    client.end(true);
+  }
+  showAlert("Reconnecting...", "warning");
+  setTimeout(() => connectMQTT(), 500);
+});
+
+// Chart controls
+document.getElementById("pause-accel").addEventListener("click", (e) => {
+  state.chartsPaused.accel = !state.chartsPaused.accel;
+  e.target.textContent = state.chartsPaused.accel ? "▶" : "⏸";
+});
+
+document.getElementById("clear-accel").addEventListener("click", () => {
+  accelChart.data.labels = [];
+  accelChart.data.datasets.forEach(d => d.data = []);
+  accelChart.update();
+});
+
+document.getElementById("pause-gyro").addEventListener("click", (e) => {
+  state.chartsPaused.gyro = !state.chartsPaused.gyro;
+  e.target.textContent = state.chartsPaused.gyro ? "▶" : "⏸";
+});
+
+document.getElementById("clear-gyro").addEventListener("click", () => {
+  gyroChart.data.labels = [];
+  gyroChart.data.datasets.forEach(d => d.data = []);
+  gyroChart.update();
+});
+
+// Settings
+document.getElementById("chart-length").addEventListener("input", (e) => {
+  state.maxChartPoints = parseInt(e.target.value);
+  document.getElementById("chart-length-val").textContent = state.maxChartPoints;
+});
+
+document.getElementById("rate-limit").addEventListener("input", (e) => {
+  state.rateLimit = parseInt(e.target.value);
+  document.getElementById("rate-limit-val").textContent = state.rateLimit + " Hz";
+});
+
+function showAlert(message, type = "info") {
+  const alertBox = document.getElementById("alert-box");
+  alertBox.textContent = message;
+  alertBox.className = `alert show ${type}`;
+  setTimeout(() => alertBox.classList.remove("show"), 3000);
+}
+
+/* ===================== MQTT MESSAGE HANDLER ===================== */
+let lastMessageTime = 0;
+let messageTimestamps = [];
+
+client.on("message", (_, payload) => {
+  const now = performance.now();
+  
+  // Rate limiting
+  const minInterval = 1000 / state.rateLimit;
+  if (now - lastMessageTime < minInterval) return;
+  lastMessageTime = now;
+  
+  try {
+    const msg = JSON.parse(payload.toString());
+    const a = msg.imu.linear_acceleration;
+    const g = msg.imu.angular_velocity;
+    const q = msg.imu.orientation;
+    
+    // Calculate magnitudes
+    const accelMag = Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
+    const gyroMag = Math.sqrt(g.x * g.x + g.y * g.y + g.z * g.z);
+    
+    // Update charts
+    pushChartData(accelChart, a.x, a.y, a.z, state.chartsPaused.accel);
+    pushChartData(gyroChart, g.x, g.y, g.z, state.chartsPaused.gyro);
+    
+    // Update 3D model (ENU → Three.js)
+    imuGroup.quaternion.set(q.x, q.z, -q.y, q.w);
+    
+    // Update trail
+    if (state.showTrail) {
+      const pos = imuGroup.position.clone();
+      pos.y += Math.sin(now * 0.001) * 0.5; // Simulate motion
+      state.trail.push(pos);
+      if (state.trail.length > 100) {
+        state.trail.shift();
+      }
+    }
+    
+    // Calculate Euler angles
+    const euler = new THREE.Euler().setFromQuaternion(imuGroup.quaternion, "YXZ");
+    let roll = THREE.MathUtils.radToDeg(euler.z);
+    let pitch = THREE.MathUtils.radToDeg(euler.x);
+    let yaw = THREE.MathUtils.radToDeg(euler.y);
+    
+    if (state.calibrated) {
+      yaw -= state.yawOffset;
+      if (yaw > 180) yaw -= 360;
+      if (yaw < -180) yaw += 360;
+    }
+    
+    // Update displays with animation
+    updateAngleDisplay("roll", roll);
+    updateAngleDisplay("pitch", pitch);
+    updateAngleDisplay("yaw", yaw);
+    
+    document.getElementById("accel-x").textContent = a.x.toFixed(2);
+    document.getElementById("accel-y").textContent = a.y.toFixed(2);
+    document.getElementById("accel-z").textContent = a.z.toFixed(2);
+    
+    document.getElementById("gyro-x").textContent = g.x.toFixed(2);
+    document.getElementById("gyro-y").textContent = g.y.toFixed(2);
+    document.getElementById("gyro-z").textContent = g.z.toFixed(2);
+    
+    // Magnitude displays
+    document.getElementById("accel-mag").textContent = accelMag.toFixed(2) + " m/s²";
+    document.getElementById("gyro-mag").textContent = gyroMag.toFixed(3) + " rad/s";
+    
+    const accelPercent = Math.min((accelMag / 20) * 100, 100);
+    const gyroPercent = Math.min((gyroMag / 5) * 100, 100);
+    document.getElementById("accel-mag-bar").style.width = accelPercent + "%";
+    document.getElementById("gyro-mag-bar").style.width = gyroPercent + "%";
+    
+    // Calculate update rate
+    messageTimestamps.push(now);
+    messageTimestamps = messageTimestamps.filter(t => now - t < 1000);
+    state.updateRate = messageTimestamps.length;
+    
+    document.getElementById("update-rate").textContent = state.updateRate + " Hz";
+    document.getElementById("msg-count").textContent = ++state.msgCount;
+    state.dataPoints = accelChart.data.labels.length;
+    document.getElementById("data-points").textContent = state.dataPoints;
+    
+    // Recording time
+    if (state.recording) {
+      const elapsed = Math.floor((Date.now() - state.recordingStartTime) / 1000);
+      const minutes = Math.floor(elapsed / 60);
+      const seconds = elapsed % 60;
+      document.getElementById("record-time").textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+      
+      state.recordedData.push({
+        timestamp: Date.now(),
+        roll, pitch, yaw,
+        accel: { x: a.x, y: a.y, z: a.z },
+        gyro: { x: g.x, y: g.y, z: g.z },
+        accelMag,
+        gyroMag
+      });
+    }
+  } catch (error) {
+    console.error("Error processing message:", error);
+  }
+});
+
+function updateAngleDisplay(type, value) {
+  const card = document.getElementById(`${type}-card`);
+  const display = document.getElementById(`${type}-display`);
+  
+  display.textContent = value.toFixed(1) + "°";
+  
+  // Add update animation
+  card.classList.remove("updating");
+  void card.offsetWidth; // Force reflow
+  card.classList.add("updating");
+}
+</script>
+
+</body>
+</html>

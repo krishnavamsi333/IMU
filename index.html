@@ -640,7 +640,7 @@ const state = {
 let client;
 
 function connectMQTT() {
-  client = mqtt.connect("ws://broker.emqx.io:8083/mqtt", {
+  client = mqtt.connect("wss://broker.emqx.io:8084/mqtt", {
     clientId: "imu_pro_" + Math.random().toString(16).slice(2),
     reconnectPeriod: 3000,
     connectTimeout: 10000
